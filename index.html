@@ -1,0 +1,83 @@
+from pathlib import Path
+
+path = Path("/mnt/data/neverland_galerie.html")
+html = path.read_text(encoding="utf-8")
+
+html = html.replace(
+'''    <button onclick="openUploadModal()" class="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-slate-900 hover:bg-slate-800 text-white text-sm font-semibold"><i class="fa-solid fa-plus text-xs"></i><span class="hidden sm:inline">Ajouter une capture</span><span class="sm:hidden">Ajouter</span></button>''',
+'''    <div class="flex items-center gap-2">
+      <button onclick="exportBackup()" class="inline-flex items-center gap-2 px-3 py-2 rounded-full border border-slate-200 bg-white hover:bg-slate-50 text-slate-700 text-sm font-semibold" title="Exporter une sauvegarde"><i class="fa-solid fa-download"></i><span class="hidden sm:inline">Sauvegarder</span></button>
+      <button onclick="document.getElementById('backup-file').click()" class="inline-flex items-center gap-2 px-3 py-2 rounded-full border border-slate-200 bg-white hover:bg-slate-50 text-slate-700 text-sm font-semibold" title="Importer une sauvegarde"><i class="fa-solid fa-upload"></i><span class="hidden sm:inline">Restaurer</span></button>
+      <input id="backup-file" type="file" accept=".json,application/json" class="hidden">
+      <button onclick="openUploadModal()" class="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-slate-900 hover:bg-slate-800 text-white text-sm font-semibold"><i class="fa-solid fa-plus text-xs"></i><span class="hidden sm:inline">Ajouter une capture</span><span class="sm:hidden">Ajouter</span></button>
+    </div>'''
+)
+
+html = html.replace(
+'''  <p id="status" role="status" class="text-center text-sm text-slate-500 mt-6"></p>''',
+'''  <div class="mt-8 mx-auto max-w-2xl rounded-2xl border border-sky-100 bg-sky-50/70 p-4 text-left">
+    <p class="font-semibold text-slate-800 text-sm"><i class="fa-solid fa-cloud-arrow-down text-sky-600 mr-2"></i>Protège tes souvenirs</p>
+    <p class="text-xs text-slate-600 mt-1">Télécharge régulièrement une sauvegarde JSON. Pour récupérer tes photos sur un autre téléphone ou après un nettoyage du navigateur, utilise « Restaurer » et sélectionne ce fichier.</p>
+  </div>
+  <p id="status" role="status" class="text-center text-sm text-slate-500 mt-5"></p>'''
+)
+
+marker = '''async function deleteMemory(id){
+  if(!confirm('Supprimer définitivement ce souvenir de cet appareil ?'))return;
+  await remove(id);await refresh();document.getElementById('status').textContent='Souvenir supprimé.';
+}
+'''
+replacement = marker + '''
+// Sauvegarde complète : les images sont incluses dans le fichier JSON.
+async function exportBackup(){
+  try{
+    const records=await getAll();
+    const backup={app:'Neverland Memories',version:1,exportedAt:new Date().toISOString(),adventures:records};
+    const blob=new Blob([JSON.stringify(backup)],{type:'application/json'});
+    const url=URL.createObjectURL(blob);
+    const link=document.createElement('a');
+    link.href=url;
+    link.download='neverland-sauvegarde-'+new Date().toISOString().slice(0,10)+'.json';
+    document.body.appendChild(link);link.click();link.remove();
+    URL.revokeObjectURL(url);
+    document.getElementById('status').textContent='Sauvegarde téléchargée avec toutes tes captures.';
+  }catch(error){
+    console.error(error);
+    alert('La sauvegarde a échoué. Réessaie après avoir vérifié l’espace disponible.');
+  }
+}
+
+document.getElementById('backup-file').addEventListener('change',async event=>{
+  const file=event.target.files[0];
+  if(!file)return;
+  try{
+    const parsed=JSON.parse(await file.text());
+    const records=Array.isArray(parsed)?parsed:parsed.adventures;
+    if(!Array.isArray(records))throw new Error('Format de sauvegarde invalide.');
+    const valid=records.filter(item=>
+      item && typeof item.id==='string' && typeof item.title==='string' &&
+      typeof item.category==='string' && ['mariage','coucher-soleil','nuit-nature'].includes(item.category) &&
+      typeof item.image==='string' && item.image.startsWith('data:image/')
+    );
+    if(!valid.length)throw new Error('Aucun souvenir valide trouvé dans ce fichier.');
+    if(!confirm('Importer '+valid.length+' souvenir(s) ? Les souvenirs déjà présents avec le même identifiant seront mis à jour. Les autres seront conservés.'))return;
+    for(const item of valid){
+      // Les fichiers de sauvegarde ne peuvent ajouter que des images intégrées.
+      await save({...item,custom:true,createdAt:item.createdAt||Date.now()});
+    }
+    await refresh();
+    document.getElementById('status').textContent=valid.length+' souvenir(s) restauré(s) avec succès.';
+  }catch(error){
+    console.error(error);
+    alert('Impossible de lire cette sauvegarde. Vérifie que tu as sélectionné un fichier JSON exporté depuis ta galerie Neverland.');
+  }finally{
+    event.target.value='';
+  }
+});
+'''
+if marker not in html:
+    raise RuntimeError("Point d'insertion introuvable")
+html = html.replace(marker, replacement)
+
+path.write_text(html, encoding="utf-8")
+print(f"Galerie mise à jour : {path} ({path.stat().st_size:,} octets)")
